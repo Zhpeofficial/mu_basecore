@@ -2731,6 +2731,44 @@ CoreInitializeGcdServices (
   }
 
   //
+  // Ensure the Upper DDR Conv region is present in the EFI memory map.
+  // bootmgfw.efi needs to ConvertPages within 0xB0000000-0x280000000.
+  //
+  BaseAddress = 0xB0000000;
+  Length      = 0x1D0000000;
+  Status      = CoreGetMemorySpaceDescriptor (BaseAddress, &Descriptor);
+  if (!EFI_ERROR (Status)) {
+    CoreAddMemoryDescriptor (
+      EfiConventionalMemory,
+      BaseAddress,
+      RShiftU64 (Length, EFI_PAGE_SHIFT),
+      Descriptor.Capabilities & (~EFI_MEMORY_RUNTIME)
+      );
+  }
+
+  //
+  // Ensure the low-memory region 0x102000 (legacy boot area) is in the map.
+  //
+  BaseAddress = 0x00102000;
+  Length      = 0x00001000;
+  Status      = CoreGetMemorySpaceDescriptor (BaseAddress, &Descriptor);
+  if (EFI_ERROR (Status)) {
+    CoreAddMemoryDescriptor (
+      EfiConventionalMemory,
+      BaseAddress,
+      RShiftU64 (Length, EFI_PAGE_SHIFT),
+      EFI_MEMORY_WB
+      );
+  } else {
+    CoreAddMemoryDescriptor (
+      EfiConventionalMemory,
+      BaseAddress,
+      RShiftU64 (Length, EFI_PAGE_SHIFT),
+      Descriptor.Capabilities & (~EFI_MEMORY_RUNTIME)
+      );
+  }
+
+  //
   // Allocate first memory region from the GCD by the DXE core
   //
   Status = CoreGetMemorySpaceDescriptor (MemoryBaseAddress, &Descriptor);
