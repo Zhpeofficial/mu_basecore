@@ -2907,5 +2907,25 @@ CoreInitializeGcdServices (
 
   CoreFreePool (MemorySpaceMap);
 
+  //
+  // Ensure Upper DDR region (0xB0000000+) is in gMemoryMap for 8GB DDR devices.
+  // The PHIT check may skip this region if PHIT is in Lower DDR.
+  //
+  {
+    EFI_GCD_MEMORY_SPACE_DESCRIPTOR  Desc;
+    Status = CoreGetMemorySpaceDescriptor (0xB0000000, &Desc);
+    if (!EFI_ERROR (Status) &&
+        (Desc.GcdMemoryType == EfiGcdMemoryTypeSystemMemory) &&
+        (Desc.Length > 0))
+    {
+      CoreAddMemoryDescriptor (
+        EfiConventionalMemory,
+        0xB0000000,
+        RShiftU64 (Desc.Length, EFI_PAGE_SHIFT),
+        Desc.Capabilities & (~EFI_MEMORY_RUNTIME)
+        );
+    }
+  }
+
   return EFI_SUCCESS;
 }
