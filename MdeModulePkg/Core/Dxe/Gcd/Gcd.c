@@ -2907,5 +2907,37 @@ CoreInitializeGcdServices (
 
   CoreFreePool (MemorySpaceMap);
 
+  //
+  // Ensure Upper DDR Conv region (0xB0000000-0x280000000) is in gMemoryMap
+  // for 8GB DDR devices where Upper DDR may not be processed by PHIT check
+  //
+  {
+    EFI_GCD_MEMORY_SPACE_DESCRIPTOR  UpperDdrDesc;
+    Status = CoreGetMemorySpaceDescriptor (0xB0000000, &UpperDdrDesc);
+    if (!EFI_ERROR (Status) &&
+        (UpperDdrDesc.GcdMemoryType == EfiGcdMemoryTypeSystemMemory) &&
+        (UpperDdrDesc.Length > 0))
+    {
+      // Check if already in gMemoryMap
+      LIST_ENTRY  *Link;
+      BOOLEAN     Found = FALSE;
+      for (Link = gMemoryMap.ForwardLink; Link != &gMemoryMap; Link = Link->ForwardLink) {
+        MEMORY_MAP *MapEntry = CR (Link, MEMORY_MAP, Link, MEMORY_MAP_SIGNATURE);
+        if (MapEntry->Start <= 0xB0000000 && MapEntry->End >= 0xB0000000) {
+          Found = TRUE;
+          break;
+        }
+      }
+      if (!Found) {
+        CoreAddMemoryDescriptor (
+          EfiConventionalMemory,
+          0xB0000000,
+          RShiftU64 (UpperDdrDesc.Length, EFI_PAGE_SHIFT),
+          UpperDdrDesc.Capabilities & (~EFI_MEMORY_RUNTIME)
+          );
+      }
+    }
+  }
+
   return EFI_SUCCESS;
 }
