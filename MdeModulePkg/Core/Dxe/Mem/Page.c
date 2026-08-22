@@ -660,6 +660,20 @@ CoreConvertPagesEx (
     }
 
     if ((Link == &gMemoryMap) || (Entry == NULL)) {
+      // Dump gMemoryMap contents for debugging
+      {
+        LIST_ENTRY *DbgLink;
+        MEMORY_MAP *DbgEntry;
+        UINTN DbgCount = 0;
+        DEBUG ((DEBUG_ERROR | DEBUG_PAGE, "ConvertPages: searching for %lx - %lx\n", Start, End));
+        for (DbgLink = gMemoryMap.ForwardLink; DbgLink != &gMemoryMap; DbgLink = DbgLink->ForwardLink) {
+          DbgEntry = CR (DbgLink, MEMORY_MAP, Link, MEMORY_MAP_SIGNATURE);
+          DEBUG ((DEBUG_ERROR | DEBUG_PAGE, "  gMemoryMap[%d]: %lx-%lx Type=%d\n",
+                 DbgCount, DbgEntry->Start, DbgEntry->End, DbgEntry->Type));
+          DbgCount++;
+          if (DbgCount > 50) break;
+        }
+      }
       DEBUG ((DEBUG_ERROR | DEBUG_PAGE, "ConvertPages: failed to find range %lx - %lx\n", Start, End));
       return EFI_NOT_FOUND;
     }
