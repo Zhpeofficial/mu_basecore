@@ -2731,6 +2731,8 @@ CoreInitializeGcdServices (
   }
 
   //
+  // Allocate first memory region from the GCD by the DXE core
+  //
   // Ensure the Upper DDR Conv region is present in the EFI memory map.
   // bootmgfw.efi needs to ConvertPages within 0xB0000000-0x280000000.
   //
