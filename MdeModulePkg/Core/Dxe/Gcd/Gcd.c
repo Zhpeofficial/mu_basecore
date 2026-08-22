@@ -2913,12 +2913,14 @@ CoreInitializeGcdServices (
   // Directly add without checking GCD to avoid potential descriptor lookup failures.
   // 0x1D0000000 bytes = 0x1D00000 pages (7.5GB)
   //
+  DEBUG ((EFI_D_INFO, "GCD: Adding Upper DDR (0xB0000000, 0x1D00000 pages) to gMemoryMap\n"));
   CoreAddMemoryDescriptor (
     EfiConventionalMemory,
     0xB0000000,
     0x1D00000,
     0
     );
+  DEBUG ((EFI_D_INFO, "GCD: Upper DDR added to gMemoryMap\n"));
 
   return EFI_SUCCESS;
 }
