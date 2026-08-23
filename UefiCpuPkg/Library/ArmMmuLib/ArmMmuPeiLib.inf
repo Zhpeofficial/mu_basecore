@@ -48,6 +48,9 @@
 [Guids]
   gArmMmuReplaceLiveTranslationEntryFuncGuid
 
+[Protocols]
+  gArmPageTableMemoryAllocationProtocolGuid
+
 [Pcd.ARM]
   gArmTokenSpaceGuid.PcdNormalMemoryNonshareableOverride
 # MU_CHANGE [END]: Make instance compatible with PEIM, PEI_CORE, and SEC
