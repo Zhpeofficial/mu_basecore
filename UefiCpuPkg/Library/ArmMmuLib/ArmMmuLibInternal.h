@@ -2,9 +2,9 @@
   Arm MMU library instance internal header file.
 
   Copyright (C) Microsoft Corporation. All rights reserved.
-
   SPDX-License-Identifier: BSD-2-Clause-Patent
 
+  MU_CHANGE [WHOLE FILE]: Add function pointer type
 **/
 
 #ifndef ARM_MMU_LIB_INTERNAL_H_
