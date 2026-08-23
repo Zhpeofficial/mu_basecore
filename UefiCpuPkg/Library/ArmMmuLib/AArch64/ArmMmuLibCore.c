@@ -1,7 +1,7 @@
 /** @file
 *  File managing the MMU for ARMv8 architecture
 *
-*  Copyright (c) 2011-2025, ARM Limited. All rights reserved.
+*  Copyright (c) 2011-2020, ARM Limited. All rights reserved.
 *  Copyright (c) 2016, Linaro Limited. All rights reserved.
 *  Copyright (c) 2017, Intel Corporation. All rights reserved.<BR>
 *
@@ -20,26 +20,27 @@
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/HobLib.h>
-#include "ArmMmuLibInternal.h"
+#include "ArmMmuLibInternal.h"    // MU_CHANGE: Add function pointer type
 
+// MU_CHANGE [BEGIN]: Add function pointer type
 STATIC  ARM_REPLACE_LIVE_TRANSLATION_ENTRY  mReplaceLiveEntryFunc = ArmReplaceLiveTranslationEntry;
+// MU_CHANGE [END]: Add function pointer type
+
+// MU_CHANGE START: Add functionality for pre-allocating memory for page table entries
 
 /**
-  Whether the current translation regime is either EL1&0 or EL2&0, and
-  therefore supports non-global, ASID-scoped memory mappings.
- **/
-STATIC
-BOOLEAN
-TranslationRegimeIsDual (
-  VOID
-  )
-{
-  if (ArmReadCurrentEL () == AARCH64_EL2) {
-    return (ArmReadHcr () & ARM_HCR_E2H) != 0;
-  }
+  Allocates pages for the page table from a reserved pool.
 
-  return TRUE;
-}
+  @param[in]  Pages  The number of pages to allocate
+
+  @return A pointer to the allocated buffer or NULL if allocation fails
+**/
+VOID *
+AllocatePageTableMemory (
+  IN UINTN  Pages
+  );
+
+// MU_CHANGE END
 
 STATIC
 UINT64
@@ -56,7 +57,7 @@ ArmMemoryAttributeToPageAttribute (
 
     case ARM_MEMORY_REGION_ATTRIBUTE_WRITE_BACK_XP:
     case ARM_MEMORY_REGION_ATTRIBUTE_DEVICE:
-      if (!TranslationRegimeIsDual ()) {
+      if (ArmReadCurrentEL () == AARCH64_EL2) {
         Permissions = TT_XN_MASK;
       } else {
         Permissions = TT_UXN_MASK | TT_PXN_MASK;
@@ -70,7 +71,7 @@ ArmMemoryAttributeToPageAttribute (
 
   switch (Attributes) {
     case ARM_MEMORY_REGION_ATTRIBUTE_WRITE_BACK_NONSHAREABLE:
-      return TT_ATTR_INDX_MEMORY_WRITE_BACK | Permissions;
+      return TT_ATTR_INDX_MEMORY_WRITE_BACK;
 
     case ARM_MEMORY_REGION_ATTRIBUTE_WRITE_BACK:
     case ARM_MEMORY_REGION_ATTRIBUTE_WRITE_BACK_RO:
@@ -82,7 +83,7 @@ ArmMemoryAttributeToPageAttribute (
 
     // Uncached and device mappings are treated as outer shareable by default,
     case ARM_MEMORY_REGION_ATTRIBUTE_UNCACHED_UNBUFFERED:
-      return TT_ATTR_INDX_MEMORY_NON_CACHEABLE | Permissions;
+      return TT_ATTR_INDX_MEMORY_NON_CACHEABLE;
 
     default:
       ASSERT (0);
@@ -91,41 +92,9 @@ ArmMemoryAttributeToPageAttribute (
   }
 }
 
-// T0SZ can be below MIN_T0SZ when LPA2 is in use, meaning the page table starts at level -1
 #define MIN_T0SZ        16
 #define BITS_PER_LEVEL  9
-#define MAX_VA_BITS     52
-
-STATIC
-VOID
-SetOutputAddress (
-  IN  UINTN    *Entry,
-  IN  UINTN    Address,
-  IN  BOOLEAN  Lpa2Enabled
-  )
-{
-  if (Lpa2Enabled) {
-    *Entry &= ~(TT_ADDRESS_MASK_BLOCK_ENTRY_LPA2 | TT_UPPER_ADDRESS_MASK);
-    *Entry |= ((UINTN)Address & TT_ADDRESS_MASK_BLOCK_ENTRY_LPA2) | (((UINTN)Address >> 50) << 8);
-  } else {
-    *Entry &= ~TT_ADDRESS_MASK_BLOCK_ENTRY;
-    *Entry |= (Address & TT_ADDRESS_MASK_BLOCK_ENTRY);
-  }
-}
-
-STATIC
-UINT64
-GetOutputAddress (
-  IN  UINT64   Entry,
-  IN  BOOLEAN  Lpa2Enabled
-  )
-{
-  if (Lpa2Enabled) {
-    return (Entry & TT_ADDRESS_MASK_BLOCK_ENTRY_LPA2) | ((Entry & TT_UPPER_ADDRESS_MASK) << (50 - 8));
-  } else {
-    return Entry & TT_ADDRESS_MASK_BLOCK_ENTRY;
-  }
-}
+#define MAX_VA_BITS     48
 
 STATIC
 UINTN
@@ -137,17 +106,12 @@ GetRootTableEntryCount (
 }
 
 STATIC
-INTN
+UINTN
 GetRootTableLevel (
   IN  UINTN  T0SZ
   )
 {
-  INTN  RootTableLevel;
-
-  RootTableLevel =  (T0SZ < MIN_T0SZ) ? -1 : (INTN)(T0SZ - MIN_T0SZ) / BITS_PER_LEVEL;
-  ASSERT (RootTableLevel >= 0 || ArmLpa2Enabled ());
-
-  return RootTableLevel;
+  return (T0SZ - MIN_T0SZ) / BITS_PER_LEVEL;
 }
 
 STATIC
@@ -196,9 +160,8 @@ ReplaceTableEntry (
 STATIC
 VOID
 FreePageTablesRecursive (
-  IN  UINT64   *TranslationTable,
-  IN  UINTN    Level,
-  IN  BOOLEAN  Lpa2Enabled
+  IN  UINT64  *TranslationTable,
+  IN  UINTN   Level
   )
 {
   UINTN  Index;
@@ -209,12 +172,9 @@ FreePageTablesRecursive (
     for (Index = 0; Index < TT_ENTRY_COUNT; Index++) {
       if ((TranslationTable[Index] & TT_TYPE_MASK) == TT_TYPE_TABLE_ENTRY) {
         FreePageTablesRecursive (
-          (VOID *)GetOutputAddress (
-                    TranslationTable[Index],
-                    Lpa2Enabled
-                    ),
-          Level + 1,
-          Lpa2Enabled
+          (VOID *)(UINTN)(TranslationTable[Index] &
+                          TT_ADDRESS_MASK_BLOCK_ENTRY),
+          Level + 1
           );
       }
     }
@@ -263,10 +223,8 @@ UpdateRegionMappingRecursive (
   IN  UINT64   AttributeSetMask,
   IN  UINT64   AttributeClearMask,
   IN  UINT64   *PageTable,
-  IN  INTN     Level,
-  IN  BOOLEAN  IsRootTable,
-  IN  BOOLEAN  TableIsLive,
-  IN  BOOLEAN  Lpa2Enabled
+  IN  UINTN    Level,
+  IN  BOOLEAN  TableIsLive
   )
 {
   UINTN       BlockShift;
@@ -277,15 +235,11 @@ UpdateRegionMappingRecursive (
   VOID        *TranslationTable;
   EFI_STATUS  Status;
   BOOLEAN     NextTableIsLive;
-  VOID        *TablesToFree[2];
 
   ASSERT (((RegionStart | RegionEnd) & EFI_PAGE_MASK) == 0);
 
   BlockShift = (Level + 1) * BITS_PER_LEVEL + MIN_T0SZ;
   BlockMask  = MAX_UINT64 >> BlockShift;
-
-  TablesToFree[0] = NULL;
-  TablesToFree[1] = NULL;
 
   DEBUG ((
     DEBUG_VERBOSE,
@@ -315,7 +269,7 @@ UpdateRegionMappingRecursive (
     // the MMU in order to update page table entries safely, so prefer page
     // mappings in that particular case.
     //
-    if ((Level <= 0) || (((RegionStart | BlockEnd) & BlockMask) != 0) ||
+    if ((Level == 0) || (((RegionStart | BlockEnd) & BlockMask) != 0) ||
         ((Level < 3) && (((UINT64)PageTable & ~BlockMask) == RegionStart)) ||
         IsTableEntry (*Entry, Level))
     {
@@ -336,72 +290,52 @@ UpdateRegionMappingRecursive (
         // No table entry exists yet, so we need to allocate a page table
         // for the next level.
         //
-        TranslationTable = AllocatePages (1);
+        // MU_CHANGE START: Use reserved page table memory pool
+        // TranslationTable = AllocatePages (1);
+        TranslationTable = AllocatePageTableMemory (1);
+        // MU_CHANGE END
         if (TranslationTable == NULL) {
           return EFI_OUT_OF_RESOURCES;
         }
 
-        //
-        // Allocating a page may have split this block if a guard page
-        // was allocated in this block. Check if this is already split
-        // and if so skip the splitting logic
-        //
-        if (IsTableEntry (*Entry, Level)) {
+        if (!ArmMmuEnabled ()) {
           //
-          // Don't free the page table here, we may end up recreating the
-          // large page. This mapping may extend across the block boundary,
-          // so its possible we could have two pages to free in the worst case.
+          // Make sure we are not inadvertently hitting in the caches
+          // when populating the page tables.
           //
-          if (TablesToFree[0] == NULL) {
-            TablesToFree[0] = TranslationTable;
-          } else {
-            TablesToFree[1] = TranslationTable;
-          }
-
-          TranslationTable = (VOID *)GetOutputAddress (*Entry, Lpa2Enabled);
-          NextTableIsLive  = TableIsLive;
-        } else {
-          if (!ArmMmuEnabled ()) {
-            //
-            // Make sure we are not inadvertently hitting in the caches
-            // when populating the page tables.
-            //
-            InvalidateDataCacheRange (TranslationTable, EFI_PAGE_SIZE);
-          }
-
-          ZeroMem (TranslationTable, EFI_PAGE_SIZE);
-
-          if (IsBlockEntry (*Entry, Level)) {
-            //
-            // We are splitting an existing block entry, so we have to populate
-            // the new table with the attributes of the block entry it replaces.
-            //
-            Status = UpdateRegionMappingRecursive (
-                       RegionStart & ~BlockMask,
-                       (RegionStart | BlockMask) + 1,
-                       *Entry & TT_ATTRIBUTES_MASK,
-                       0,
-                       TranslationTable,
-                       Level + 1,
-                       FALSE,
-                       FALSE,
-                       Lpa2Enabled
-                       );
-            if (EFI_ERROR (Status)) {
-              //
-              // The range we passed to UpdateRegionMappingRecursive () is block
-              // aligned, so it is guaranteed that no further pages were allocated
-              // by it, and so we only have to free the page we allocated here.
-              //
-              FreePages (TranslationTable, 1);
-              return Status;
-            }
-          }
-
-          NextTableIsLive = FALSE;
+          InvalidateDataCacheRange (TranslationTable, EFI_PAGE_SIZE);
         }
+
+        ZeroMem (TranslationTable, EFI_PAGE_SIZE);
+
+        if (IsBlockEntry (*Entry, Level)) {
+          //
+          // We are splitting an existing block entry, so we have to populate
+          // the new table with the attributes of the block entry it replaces.
+          //
+          Status = UpdateRegionMappingRecursive (
+                     RegionStart & ~BlockMask,
+                     (RegionStart | BlockMask) + 1,
+                     *Entry & TT_ATTRIBUTES_MASK,
+                     0,
+                     TranslationTable,
+                     Level + 1,
+                     FALSE
+                     );
+          if (EFI_ERROR (Status)) {
+            //
+            // The range we passed to UpdateRegionMappingRecursive () is block
+            // aligned, so it is guaranteed that no further pages were allocated
+            // by it, and so we only have to free the page we allocated here.
+            //
+            FreePages (TranslationTable, 1);
+            return Status;
+          }
+        }
+
+        NextTableIsLive = FALSE;
       } else {
-        TranslationTable = (VOID *)GetOutputAddress (*Entry, Lpa2Enabled);
+        TranslationTable = (VOID *)(UINTN)(*Entry & TT_ADDRESS_MASK_BLOCK_ENTRY);
         NextTableIsLive  = TableIsLive;
       }
 
@@ -415,9 +349,7 @@ UpdateRegionMappingRecursive (
                  AttributeClearMask,
                  TranslationTable,
                  Level + 1,
-                 FALSE,
-                 NextTableIsLive,
-                 Lpa2Enabled
+                 NextTableIsLive
                  );
       if (EFI_ERROR (Status)) {
         if (!IsTableEntry (*Entry, Level)) {
@@ -428,16 +360,14 @@ UpdateRegionMappingRecursive (
           // possible for existing table entries, since we cannot revert the
           // modifications we made to the subhierarchy it represents.)
           //
-          FreePageTablesRecursive (TranslationTable, Level + 1, Lpa2Enabled);
+          FreePageTablesRecursive (TranslationTable, Level + 1);
         }
 
         return Status;
       }
 
       if (!IsTableEntry (*Entry, Level)) {
-        EntryValue = TT_TYPE_TABLE_ENTRY;
-        SetOutputAddress (&EntryValue, (UINTN)TranslationTable, Lpa2Enabled);
-
+        EntryValue = (UINTN)TranslationTable | TT_TYPE_TABLE_ENTRY;
         ReplaceTableEntry (
           Entry,
           EntryValue,
@@ -447,28 +377,13 @@ UpdateRegionMappingRecursive (
           );
       }
     } else {
-      EntryValue = (*Entry & AttributeClearMask) | AttributeSetMask;
-      // Below clears shareability bits when LPA2 is in use
-      SetOutputAddress (&EntryValue, RegionStart, Lpa2Enabled);
+      EntryValue  = (*Entry & AttributeClearMask) | AttributeSetMask;
+      EntryValue |= RegionStart;
       EntryValue |= (Level == 3) ? TT_TYPE_BLOCK_ENTRY_LEVEL3
                                  : TT_TYPE_BLOCK_ENTRY;
 
       ReplaceTableEntry (Entry, EntryValue, RegionStart, BlockMask, FALSE);
     }
-  }
-
-  //
-  // We may have left up to two orphaned page table pages if we discovered a
-  // recursive call already split a block on either side of a misaligned region.
-  //
-  if (TablesToFree[0] != NULL) {
-    FreePages (TablesToFree[0], 1);
-    TablesToFree[0] = NULL;
-  }
-
-  if (TablesToFree[1] != NULL) {
-    FreePages (TablesToFree[1], 1);
-    TablesToFree[1] = NULL;
   }
 
   return EFI_SUCCESS;
@@ -482,8 +397,7 @@ UpdateRegionMapping (
   IN  UINT64   AttributeSetMask,
   IN  UINT64   AttributeClearMask,
   IN  UINT64   *RootTable,
-  IN  BOOLEAN  TableIsLive,
-  IN  BOOLEAN  Lpa2Enabled
+  IN  BOOLEAN  TableIsLive
   )
 {
   UINTN  T0SZ;
@@ -495,7 +409,7 @@ UpdateRegionMapping (
       __func__,
       RegionStart,
       RegionLength
-      ));
+      )); // MU_CHANGE: Better memory attribute protocol logging
     return EFI_INVALID_PARAMETER;
   }
 
@@ -508,9 +422,7 @@ UpdateRegionMapping (
            AttributeClearMask,
            RootTable,
            GetRootTableLevel (T0SZ),
-           TRUE,
-           TableIsLive,
-           Lpa2Enabled
+           TableIsLive
            );
 }
 
@@ -518,8 +430,7 @@ STATIC
 EFI_STATUS
 FillTranslationTable (
   IN  UINT64                        *RootTable,
-  IN  ARM_MEMORY_REGION_DESCRIPTOR  *MemoryRegion,
-  IN  BOOLEAN                       Lpa2Enabled
+  IN  ARM_MEMORY_REGION_DESCRIPTOR  *MemoryRegion
   )
 {
   return UpdateRegionMapping (
@@ -528,8 +439,7 @@ FillTranslationTable (
            ArmMemoryAttributeToPageAttribute (MemoryRegion->Attributes) | TT_AF,
            0,
            RootTable,
-           FALSE,
-           Lpa2Enabled
+           FALSE
            );
 }
 
@@ -562,7 +472,7 @@ GcdAttributeToPageAttribute (
   if (((GcdAttributes & EFI_MEMORY_XP) != 0) ||
       ((GcdAttributes & EFI_MEMORY_CACHETYPE_MASK) == EFI_MEMORY_UC))
   {
-    if (!TranslationRegimeIsDual ()) {
+    if (ArmReadCurrentEL () == AARCH64_EL2) {
       PageAttributes |= TT_XN_MASK;
     } else {
       PageAttributes |= TT_UXN_MASK | TT_PXN_MASK;
@@ -659,8 +569,7 @@ ArmSetMemoryAttributes (
            PageAttributes,
            PageAttributeMask,
            ArmGetTTBR0BaseAddress (),
-           TRUE,
-           ArmLpa2Enabled ()
+           TRUE
            );
 }
 
@@ -679,11 +588,6 @@ ArmConfigureMmu (
   UINTN       RootTableEntryCount;
   UINT64      TCR;
   EFI_STATUS  Status;
-
-  ASSERT (ArmReadCurrentEL () < AARCH64_EL3);
-  if (ArmReadCurrentEL () == AARCH64_EL3) {
-    return EFI_UNSUPPORTED;
-  }
 
   if (MemoryTable == NULL) {
     ASSERT (MemoryTable != NULL);
@@ -706,7 +610,9 @@ ArmConfigureMmu (
   //
   // Set TCR that allows us to retrieve T0SZ in the subsequent functions
   //
-  if (!TranslationRegimeIsDual ()) {
+  // Ideally we will be running at EL2, but should support EL1 as well.
+  // UEFI should not run at EL3.
+  if (ArmReadCurrentEL () == AARCH64_EL2) {
     // Note: Bits 23 and 31 are reserved(RES1) bits in TCR_EL2
     TCR = T0SZ | (1UL << 31) | (1UL << 23) | TCR_TG0_4KB;
 
@@ -723,18 +629,16 @@ ArmConfigureMmu (
       TCR |= TCR_PS_16TB;
     } else if (MaxAddress < SIZE_256TB) {
       TCR |= TCR_PS_256TB;
-    } else if ((MaxAddress < SIZE_4PB) && ArmHas52BitTgran4 ()) {
-      TCR |= TCR_PS_4PB | TCR_DS_NVHE;
     } else {
       DEBUG ((
         DEBUG_ERROR,
         "ArmConfigureMmu: The MaxAddress 0x%lX is not supported by this MMU configuration.\n",
         MaxAddress
         ));
-      ASSERT (0); // Bigger than 48/52-bit memory space are not supported
+      ASSERT (0); // Bigger than 48-bit memory space are not supported
       return EFI_UNSUPPORTED;
     }
-  } else {
+  } else if (ArmReadCurrentEL () == AARCH64_EL1) {
     // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
     TCR = T0SZ | TCR_TG0_4KB | TCR_TG1_4KB | TCR_EPD1;
 
@@ -751,17 +655,18 @@ ArmConfigureMmu (
       TCR |= TCR_IPS_16TB;
     } else if (MaxAddress < SIZE_256TB) {
       TCR |= TCR_IPS_256TB;
-    } else if ((MaxAddress < SIZE_4PB) && ArmHas52BitTgran4 ()) {
-      TCR |= TCR_IPS_4PB | TCR_DS;
     } else {
       DEBUG ((
         DEBUG_ERROR,
         "ArmConfigureMmu: The MaxAddress 0x%lX is not supported by this MMU configuration.\n",
         MaxAddress
         ));
-      ASSERT (0); // Bigger than 48/52-bit memory space are not supported
+      ASSERT (0); // Bigger than 48-bit memory space are not supported
       return EFI_UNSUPPORTED;
     }
+  } else {
+    ASSERT (0); // UEFI is only expected to run at EL2 and EL1, not EL3.
+    return EFI_UNSUPPORTED;
   }
 
   //
@@ -781,7 +686,10 @@ ArmConfigureMmu (
   ArmSetTCR (TCR);
 
   // Allocate pages for translation table
-  TranslationTable = AllocatePages (1);
+  // MU_CHANGE START: Use reserved page table memory pool
+  // TranslationTable = AllocatePages (1);
+  TranslationTable = AllocatePageTableMemory (1);
+  // MU_CHANGE END
   if (TranslationTable == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }
@@ -808,7 +716,7 @@ ArmConfigureMmu (
   ZeroMem (TranslationTable, RootTableEntryCount * sizeof (UINT64));
 
   while (MemoryTable->Length != 0) {
-    Status = FillTranslationTable (TranslationTable, MemoryTable, ArmLpa2Enabled ());
+    Status = FillTranslationTable (TranslationTable, MemoryTable);
     if (EFI_ERROR (Status)) {
       goto FreeTranslationTable;
     }
@@ -829,15 +737,7 @@ ArmConfigureMmu (
     MAIR_ATTR (TT_ATTR_INDX_MEMORY_WRITE_BACK, MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK)
     );
 
-  if ((TCR & TCR_IPS_MASK) == TCR_IPS_4PB) {
-    ArmSetTTBR0 (
-      (VOID *)
-      (((UINTN)TranslationTable & 0xffffffffffc0) |
-       (((UINTN)TranslationTable >> 48) << 2))
-      );
-  } else {
-    ArmSetTTBR0 (TranslationTable);
-  }
+  ArmSetTTBR0 (TranslationTable);
 
   if (!ArmMmuEnabled ()) {
     ArmDisableAlignmentCheck ();
@@ -855,27 +755,6 @@ FreeTranslationTable:
   return Status;
 }
 
-/**
-  Check whether a 52-bit output address can be described
-  by the translation tables (FEAT_LPA2).
-  @retval  TRUE    52-bit output address is enabled (LPA2 enabled).
-  @retval  FALSE   52-bit output address is disabled (LPA2 disabled).
-
-**/
-BOOLEAN
-ArmLpa2Enabled (
-  VOID
-  )
-{
-  UINT64  TCR;
-
-  TCR = ArmGetTCR ();
-
-  return !TranslationRegimeIsDual () ?
-         ((TCR & TCR_DS_NVHE) != 0) :
-         ((TCR & TCR_DS) != 0);
-}
-
 RETURN_STATUS
 EFIAPI
 ArmMmuBaseLibConstructor (
@@ -887,7 +766,7 @@ ArmMmuBaseLibConstructor (
 
   Hob = GetFirstGuidHob (&gArmMmuReplaceLiveTranslationEntryFuncGuid);
   if (Hob != NULL) {
-    mReplaceLiveEntryFunc = *(ARM_REPLACE_LIVE_TRANSLATION_ENTRY *)GET_GUID_HOB_DATA (Hob);
+    mReplaceLiveEntryFunc = *(ARM_REPLACE_LIVE_TRANSLATION_ENTRY *)GET_GUID_HOB_DATA (Hob); // MU_CHANGE: Add function pointer type
   } else {
     //
     // The ArmReplaceLiveTranslationEntry () helper function may be invoked
