@@ -50,8 +50,6 @@ ArmMmuBaseLibPreAllocatePageTables (
   }
 
   for (i = 0; i < PAGE_TABLE_POOL_PAGES; i++) {
-    VOID  *Page = NULL;
-
     MaxAddress = PAGE_TABLE_POOL_MAX_ADDR;
     Status = gBS->AllocatePages (
                     AllocateMaxAddress,
