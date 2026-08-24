@@ -32,11 +32,6 @@ AllocatePageTableMemory (
   IN UINTN  Pages
   );
 
-EFI_STATUS
-ArmMmuBaseLibPreAllocatePageTables (
-  VOID
-  );
-
 STATIC  ARM_REPLACE_LIVE_TRANSLATION_ENTRY  mReplaceLiveEntryFunc = ArmReplaceLiveTranslationEntry;
 
 /**
@@ -899,12 +894,6 @@ ArmMmuBaseLibConstructor (
 {
   extern UINT32  ArmReplaceLiveTranslationEntrySize;
   VOID           *Hob;
-
-  //
-  // MU_CHANGE: Pre-allocate page table memory in low memory before any
-  // large regions (e.g. Upper DDR) are mapped.
-  //
-  ArmMmuBaseLibPreAllocatePageTables ();
 
   Hob = GetFirstGuidHob (&gArmMmuReplaceLiveTranslationEntryFuncGuid);
   if (Hob != NULL) {
