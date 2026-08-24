@@ -34,23 +34,21 @@ ArmMmuBaseLibPreAllocatePageTables (
   VOID
   )
 {
-  EFI_PHYSICAL_ADDRESS  Addr;
-  EFI_STATUS            Status;
-  UINTN                 i;
+  VOID                *Page;
+  UINTN               i;
 
   if (mPageTablePoolReady) {
     return EFI_SUCCESS;
   }
 
   for (i = 0; i < PAGE_TABLE_POOL_PAGES; i++) {
-    Addr = 0;
-    Status = AllocatePages (AllocateAnyPages, EfiReservedMemoryType, 1, &Addr);
-    if (EFI_ERROR (Status)) {
+    Page = AllocatePages (1);
+    if (Page == NULL) {
       // No more memory available; stop pre-allocating.
       break;
     }
 
-    mPageTablePool[mPageTablePoolCount++] = (VOID *)(UINTN)Addr;
+    mPageTablePool[mPageTablePoolCount++] = Page;
   }
 
   mPageTablePoolReady = TRUE;
