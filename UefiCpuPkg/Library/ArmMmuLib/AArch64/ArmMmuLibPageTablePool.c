@@ -1,10 +1,14 @@
 /** @file ArmMmuLibPageTablePool.c
 
-  Pre-allocate page table memory from a reserved low-memory pool so that
-  mapping large regions (e.g. the 6GB Upper DDR at 0x100000000) does not
-  allocate page table pages from within the region being mapped. This avoids
-  the chicken-and-egg fault where the page table write lands in the still
-  unmapped Upper DDR.
+  Pre-allocate page table memory so that mapping large regions (e.g. the 6GB
+  Upper DDR at 0x100000000) does not allocate page table pages from within
+  the region being mapped. This avoids the chicken-and-egg fault where the
+  page table write lands in the still-unmapped Upper DDR.
+
+  AllocateAnyPages is used (no gBS dependency) so this library stays usable
+  in SEC/PEI. During DXE initialization the Upper DDR is not yet in the GCD,
+  so AllocateAnyPages naturally picks low (already-mapped) memory. In SEC/PEI
+  the allocation either fails (pool stays empty) or fills an unused pool.
 
   Copyright (C) Microsoft Corporation. All rights reserved.
   SPDX-License-Identifier: BSD-2-Clause-Patent
@@ -12,30 +16,26 @@
 
 #include <Uefi.h>
 #include <Library/DebugLib.h>
-#include <Library/UefiBootServicesTableLib.h>
 #include <Library/MemoryAllocationLib.h>
 
 #define PAGE_TABLE_POOL_PAGES  4096   // ~16 MB of page table memory
-#define PAGE_TABLE_POOL_MAX_ADDR  0xA0000000ULL  // Keep the pool below the Upper DDR
 
 STATIC VOID    *mPageTablePool[PAGE_TABLE_POOL_PAGES];
 STATIC UINTN    mPageTablePoolCount = 0;
 STATIC BOOLEAN  mPageTablePoolReady = FALSE;
 
 /**
-  Pre-allocate page table memory from low memory.
+  Pre-allocate page table memory.
 
-  Called from ArmMmuBaseLibConstructor during DXE initialization. Reserves
-  low-memory pages (below the Upper DDR) so that later UpdateRegionMapping
-  calls can allocate page tables without landing in the still-unmapped
-  Upper DDR.
+  Called from ArmMmuBaseLibConstructor. At DXE init the Upper DDR is not yet
+  in the GCD, so AllocateAnyPages returns low (already-mapped) memory.
 **/
 EFI_STATUS
 ArmMmuBaseLibPreAllocatePageTables (
   VOID
   )
 {
-  EFI_PHYSICAL_ADDRESS  MaxAddress;
+  EFI_PHYSICAL_ADDRESS  Addr;
   EFI_STATUS            Status;
   UINTN                 i;
 
@@ -43,26 +43,15 @@ ArmMmuBaseLibPreAllocatePageTables (
     return EFI_SUCCESS;
   }
 
-  // Only pre-allocate when boot services are available (DXE). In SEC/PEI
-  // gBS is not usable, so skip and fall back to AllocatePages later.
-  if (gBS == NULL) {
-    return EFI_UNSUPPORTED;
-  }
-
   for (i = 0; i < PAGE_TABLE_POOL_PAGES; i++) {
-    MaxAddress = PAGE_TABLE_POOL_MAX_ADDR;
-    Status = gBS->AllocatePages (
-                    AllocateMaxAddress,
-                    EfiBootServicesData,
-                    1,
-                    &MaxAddress
-                    );
+    Addr = 0;
+    Status = AllocatePages (AllocateAnyPages, EfiReservedMemoryType, 1, &Addr);
     if (EFI_ERROR (Status)) {
-      // No more low memory available; stop pre-allocating.
+      // No more memory available; stop pre-allocating.
       break;
     }
 
-    mPageTablePool[mPageTablePoolCount++] = (VOID *)(UINTN)MaxAddress;
+    mPageTablePool[mPageTablePoolCount++] = (VOID *)(UINTN)Addr;
   }
 
   mPageTablePoolReady = TRUE;
@@ -74,8 +63,7 @@ ArmMmuBaseLibPreAllocatePageTables (
 /**
   Allocates pages for the page table from the reserved pool.
 
-  Falls back to AllocatePages if the pool is not available or exhausted
-  (e.g. in SEC/PEI or for very large requests).
+  Falls back to AllocatePages if the pool is not available or exhausted.
 
   @param[in]  Pages  The number of pages to allocate
 
