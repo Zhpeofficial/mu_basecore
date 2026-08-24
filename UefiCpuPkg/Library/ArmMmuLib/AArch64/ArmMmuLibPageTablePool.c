@@ -6,9 +6,8 @@
   page table write lands in the still-unmapped Upper DDR.
 
   AllocateAnyPages is used (no gBS dependency) so this library stays usable
-  in SEC/PEI. During DXE initialization the Upper DDR is not yet in the GCD,
-  so AllocateAnyPages naturally picks low (already-mapped) memory. In SEC/PEI
-  the allocation either fails (pool stays empty) or fills an unused pool.
+  in SEC/PEI/DXE. During DXE initialization the Upper DDR is not yet in the
+  GCD, so AllocateAnyPages naturally picks low (already-mapped) memory.
 
   Copyright (C) Microsoft Corporation. All rights reserved.
   SPDX-License-Identifier: BSD-2-Clause-Patent
