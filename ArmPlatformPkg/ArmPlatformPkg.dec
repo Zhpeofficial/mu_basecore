@@ -55,6 +55,8 @@
   gArmPlatformTokenSpaceGuid.PcdGopDisableOnExitBootServices|FALSE|BOOLEAN|0x0000003D
 
 [PcdsFixedAtBuild.common]
+  gArmPlatformTokenSpaceGuid.PcdSendSgiToBringUpSecondaryCores|FALSE|BOOLEAN|0x00000004
+  gArmPlatformTokenSpaceGuid.PcdCPUCoreSecondaryStackSize|0x1000|UINT32|0x0000000A
   gArmPlatformTokenSpaceGuid.PcdCoreCount|1|UINT32|0x00000039
   gArmPlatformTokenSpaceGuid.PcdClusterCount|1|UINT32|0x00000038
 
