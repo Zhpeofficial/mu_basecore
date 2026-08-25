@@ -231,3 +231,22 @@ GetTimeInNanoSecond (
 
   return NanoSeconds;
 }
+
+/**
+  Initialize the ARM generic timer for a CPU core.
+
+  This is the TimerLib constructor, invoked on each core by the PrePi
+  bring-up path. On AArch64 the timer frequency is pre-configured by the
+  secure firmware (XBL), so we only verify that it is non-zero.
+
+  @retval RETURN_SUCCESS  The timer is usable.
+**/
+RETURN_STATUS
+EFIAPI
+TimerConstructor (
+  VOID
+  )
+{
+  ASSERT (ArmGenericTimerGetTimerFreq () != 0);
+  return RETURN_SUCCESS;
+}
