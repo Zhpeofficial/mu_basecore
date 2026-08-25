@@ -14,13 +14,12 @@
   MODULE_TYPE                    = PEIM
   VERSION_STRING                 = 1.0
     LIBRARY_CLASS                  = ArmMmuLib | PEIM PEI_CORE SEC
-  CONSTRUCTOR                    = ArmMmuPeiLibConstructor
+  CONSTRUCTOR                    = ArmMmuBaseLibConstructor
 
 [Sources.AARCH64]
   ArmMmuLibInternal.h
   AArch64/ArmMmuLibCore.c
   AArch64/ArmMmuLibReplaceEntry.S
-  AArch64/ArmMmuPeiLibConstructor.c
   AArch64/ArmMmuLibPageTableAllocNoGbs.c
 
 [Packages]
