@@ -393,4 +393,75 @@ ASM_FUNC(ArmReadIdAA64Pfr2)
   mrs   x0, ID_AA64PFR2_EL1
   ret
 
+//
+// Whole-data-cache operation helper and set/way primitives.
+// Ported from Mu_Tiano (v2.7) for the PrePi SEC entry point which needs
+// ArmInvalidateDataCache() before the data cache is enabled.
+//
+ASM_FUNC(AArch64AllDataCachesOperation)
+  stp   x29, x30, [sp, #-16]!
+  mov   x29, sp
+  mov   x1, x0
+  mrs   x6, clidr_el1
+  and   x3, x6, #0x7000000
+  lsr   x3, x3, #23
+  cbz   x3, L_Finished
+  mov   x10, #0
+Loop1:
+  add   x2, x10, x10, lsr #1
+  lsr   x12, x6, x2
+  and   x12, x12, #7
+  cmp   x12, #2
+  b.lt  L_Skip
+  msr   csselr_el1, x10
+  isb
+  mrs   x12, ccsidr_el1
+  and   x2, x12, #0x7
+  add   x2, x2, #4
+  mov   x4, #0x400
+  sub   x4, x4, #1
+  and   x4, x4, x12, lsr #3
+  clz   w5, w4
+  mov   x7, #0x00008000
+  sub   x7, x7, #1
+  and   x7, x7, x12, lsr #13
+Loop2:
+  mov   x9, x4
+Loop3:
+  lsl   x11, x9, x5
+  orr   x0, x10, x11
+  lsl   x11, x7, x2
+  orr   x0, x0, x11
+  blr   x1
+  subs  x9, x9, #1
+  b.ge  Loop3
+  subs  x7, x7, #1
+  b.ge  Loop2
+L_Skip:
+  add   x10, x10, #2
+  cmp   x3, x10
+  b.gt  Loop1
+L_Finished:
+  dsb   sy
+  isb
+  ldp   x29, x30, [sp], #0x10
+  ret
+
+
+ASM_FUNC(ArmInvalidateDataCacheEntryBySetWay)
+  dc      isw, x0
+  ret
+
+
+ASM_FUNC(ArmCleanInvalidateDataCacheEntryBySetWay)
+  dc      cisw, x0
+  ret
+
+
+ASM_FUNC(ArmCleanDataCacheEntryBySetWay)
+  dc      csw, x0
+  ret
+
+
+
 ASM_FUNCTION_REMOVE_IF_UNREFERENCED
