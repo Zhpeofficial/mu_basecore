@@ -129,3 +129,56 @@ ArmHas52BitTgran4 (
 
   return ((Mmfr0 & AARCH64_MMFR0_TGRAN4_MASK) == AARCH64_MMFR0_TGRAN4_52BITS);
 }
+
+/**
+  Invalidate the entire data cache (set/way operation).
+
+  Runs with the MMU disabled, before the data cache is enabled.
+
+**/
+VOID
+EFIAPI
+ArmInvalidateDataCache (
+  VOID
+  )
+{
+  ASSERT (!ArmMmuEnabled ());
+
+  ArmDataSynchronizationBarrier ();
+  AArch64AllDataCachesOperation (ArmInvalidateDataCacheEntryBySetWay);
+  ArmDataSynchronizationBarrier ();
+}
+
+/**
+  Clean and invalidate the entire data cache (set/way operation).
+
+**/
+VOID
+EFIAPI
+ArmCleanInvalidateDataCache (
+  VOID
+  )
+{
+  ASSERT (!ArmMmuEnabled ());
+
+  ArmDataSynchronizationBarrier ();
+  AArch64AllDataCachesOperation (ArmCleanInvalidateDataCacheEntryBySetWay);
+  ArmDataSynchronizationBarrier ();
+}
+
+/**
+  Clean the entire data cache (set/way operation).
+
+**/
+VOID
+EFIAPI
+ArmCleanDataCache (
+  VOID
+  )
+{
+  ASSERT (!ArmMmuEnabled ());
+
+  ArmDataSynchronizationBarrier ();
+  AArch64AllDataCachesOperation (ArmCleanDataCacheEntryBySetWay);
+  ArmDataSynchronizationBarrier ();
+}
