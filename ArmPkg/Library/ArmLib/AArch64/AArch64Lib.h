@@ -81,4 +81,34 @@ ArmReadIdAA64Pfr2 (
   VOID
   );
 
+
+typedef VOID (*AARCH64_CACHE_OPERATION)(
+  UINTN
+  );
+
+/** Operate on all data caches (set/way) using the given operation. **/
+VOID
+AArch64AllDataCachesOperation (
+  IN  AARCH64_CACHE_OPERATION  DataCacheOperation
+  );
+
+VOID
+EFIAPI
+ArmInvalidateDataCacheEntryBySetWay (
+  IN  UINTN  SetWayFormat
+  );
+
+VOID
+EFIAPI
+ArmCleanInvalidateDataCacheEntryBySetWay (
+  IN  UINTN  SetWayFormat
+  );
+
+VOID
+EFIAPI
+ArmCleanDataCacheEntryBySetWay (
+  IN  UINTN  SetWayFormat
+  );
+
+
 #endif // AARCH64_LIB_H_
