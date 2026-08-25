@@ -63,6 +63,19 @@ ArmPlatformInitialize (
   );
 
 /**
+  Check if the specified MPID is the primary core
+
+  @param[in] MpId  The MPID of the core to check
+
+  @return TRUE if the core is the primary core, FALSE otherwise
+
+**/
+BOOLEAN
+ArmPlatformIsPrimaryCore (
+  IN UINTN  MpId
+  );
+
+/**
   Return the Virtual Memory Map of your platform
 
   This Virtual Memory Map is used by MemoryInitPei Module to initialize the MMU on your platform.
