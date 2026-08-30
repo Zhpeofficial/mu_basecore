@@ -193,6 +193,12 @@ try:
         def override_detect_process(
             self, thebuilder, filepath, filelist, modulenode, status
         ):
+            # ----- FIX START -----
+            # Handle case where filepath is None (path resolution failed)
+            if filepath is None:
+                return self.OverrideResult.OR_DSC_INF_NOT_FOUND
+            # ----- FIX END -----
+
             # Find the specific line of Override flag
             result = self.OverrideResult.OR_ALL_GOOD
             lineno = 0
